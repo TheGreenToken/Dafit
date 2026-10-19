@@ -589,3 +589,72 @@ wer tauscht, muss die CRC neu berechnen.
 
 Sag Bescheid, welches davon zuerst – der JLFS-Parser ist die Grundlage für
 alles ab Stufe 1.
+
+---
+
+# 12. „Komplett ersetzen" – der Bauplan
+
+Kurzfassung: **ROM und `uboot.boot` bleiben, `app.bin` wird ersetzt.** Der
+vollständige Plan liegt in [`firmware/README.md`](firmware/README.md), das
+Werkzeug in [`firmware/jlfs.py`](firmware/jlfs.py).
+
+## Boot-Kette
+
+```
+Mask-ROM (unveränderbar)
+   └── uboot.boot      zweite Stufe, Hardware-Init nach isd_config.ini
+          └── app.bin  die Uhr-Firmware  ← wird ersetzt
+```
+
+„Komplett" heißt in der Praxis also: eigenes `app.bin`, verpackt in ein
+JLFS-Image, geflasht über die vorhandene OTA-Kette. Alles darunter bleibt,
+weil darin das Hardware-Wissen steckt (LCD-Init, Pinmux, Panel-Timing), das
+man sonst mühsam rekonstruieren müsste.
+
+## Phasen
+
+| Phase | Inhalt | Dauer |
+|---|---|---|
+| **P0** | UART-Pads, Dump (8 MiB), Rückschreiben testen | Tage |
+| **P1** | Stock-Image mit `jlfs.py` zerlegen | Tage |
+| **P2** | 1:1-Rebuild flashen → beweist Layout + CRC | Tage–Wochen |
+| **P3** | String-Patch → beweist Patch-Pfad | Tage |
+| **P4** | eigenes `app.bin`, erste Anzeige | Wochen–Monate |
+| **P5** | BLE + Zeit (Moyoung-v2-Kommandos) | Wochen |
+| **P6** | Sensoren roh auslesen und streamen | Wochen |
+| **P7** | eigene UI | offen |
+
+## Das Werkzeug
+
+`firmware/jlfs.py` liest und schreibt JieLi-Flash-Images:
+
+```
+python3 jlfs.py info | list | json | extract | verify | patch
+```
+
+* **CRC-16/XMODEM** – empirisch belegt: reproduziert exakt die drei
+  dokumentierten `tone.idx`-Prüfsummen (`test_crc_matches_documented_tone_idx`).
+* Parser für Flash-Header (0x0000 **und** 0x1000), Dateilisten, verschachtelte
+  Verzeichnisse (`app_dir_head`), 32-Byte-Einträge.
+* `patch` ersetzt Daten und rechnet Daten- und Header-CRC neu.
+* 9 Tests grün, inklusive Round-Trip über ein synthetisches Image mit
+  `uboot.boot`, `isd_config.ini`, `app_dir_head/app.bin`, `key_mac`.
+
+## Was noch fehlt
+
+* **Descrambler** für rohe Dumps (Algorithmus bei Quarkslab dokumentiert).
+* LZ4-Entpacken für komprimiertes `uboot.boot` (Flag `0x40`).
+* `isd_config.ini`-Parser.
+* Der Beweis, dass der Rebuild byte-exakt ist (P2).
+
+## Die ehrliche Einschätzung
+
+| Ziel | Aufwand | Wahrscheinlichkeit |
+|---|---|---|
+| Entpacken + Strings patchen | Tage | sehr hoch |
+| 1:1-Rebuild flashen | Tage–Wochen | hoch |
+| Eigenes `app.bin` mit Display + Zeit + BLE | 1–3 Monate | mittel |
+| Feature-Parität | 1–2 Jahre | niedrig |
+
+Und der pragmatische Zwischenweg bleibt: **Ziffernblatt + Gadgetbridge** liefern
+schon 80–90 % des Nutzens ohne jedes Brick-Risiko.
