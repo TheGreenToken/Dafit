@@ -264,3 +264,111 @@ eigenes Firmware-Mod ist damit kein realistischer Weg.
 
 Die APK selbst ist **nicht** eingecheckt (150 MB, und sie gehört dem Hersteller).
 Der ursprüngliche Google-Drive-Link bleibt die Quelle.
+
+---
+
+# 9. Nachtrag: Kann man die komplette Software auf der Uhr modden?
+
+Kurz: **Nein, nicht „komplett" – aber die App enthält mehr Angriffsfläche, als man
+erwartet.** Entscheidend ist die Ebene: Ziffernblatt, UI-Ressourcen, Watch-Apps
+und Firmware sind vier völlig verschiedene Baustellen.
+
+## 9.1 Was der OTA-Pfad der App verrät
+
+Der komplette Firmware-Weg ist im Bytecode nachvollziehbar
+(`com.crrepa.ble.trans.upgrade.presenter.FirmwareUpgradePresenter`):
+
+```
+1. checkFirmwareVersion(version, type, callback)
+     → api.moyoung.com/v2/upgrade/factory   (type != 1)
+     → api.moyoung.com/v2/upgrade/beta      (type == 1)
+     Parameter: version, mac, app_version=1.0.2
+2. Antwort → FirmwareVersionInfo
+     Felder: code, url, md5, size, version, type, mcu,
+             log, log_en, path, sf_ui_ver,
+             tp_bin, tp_bin_md5, tp_bin_path, tp_bin_offset, tp_bin_size
+     → KEIN Signatur-, Zertifikats- oder Public-Key-Feld
+3. downloadNewFirmware()
+     → Cache-Treffer per MD5 → sonst Download der url
+     → Prüfung ausschließlich: HexUtils.checkFileOfMd5(md5, file)
+4. startFirmwareUpgrade(...) → zza → chip-spezifischer DFU-Controller
+```
+
+**Wichtig:** Die App prüft **keine Signatur** – nur die MD5 aus derselben
+Server-Antwort. Das ist eine Integritäts-, keine Authentizitätsprüfung.
+Ob der **Bootloader der Uhr** ein signiertes Image verlangt, steht *nicht* in
+der APK; das Firmware-Image selbst liegt auch nicht in der APK (nur die URL).
+
+### Der lokale Flash-Pfad, den die UI nie benutzt
+
+`CRPBleConnection` hat drei `startFirmwareUpgrade`-Überladungen, darunter:
+
+```java
+startFirmwareUpgrade(boolean isGoodix, Uri uri, String fileName,
+                     CRPBleFirmwareUpgradeListener listener)
+```
+
+Die Implementierung (`zza.a(Z, Uri, String, Listener)`) kopiert **jede beliebige
+Content-Uri** nach `cache/firmware_upgrade/<timestamp>_<name>` und flasht sie –
+**ohne MD5-Prüfung**. Die Da-Fit-Oberfläche ruft nur die Server-Variante auf
+(`ps0$w1.call → startFirmwareUpgrade(Z, listener)`). Der lokale Pfad ist also
+vorhanden, aber nicht über die UI erreichbar: ein gepatchtes Da Fit oder ein
+eigener Client mit den SDK-Klassen könnte ihn nutzen.
+
+### Übertragung: CRC ja, Signatur nein
+
+Der Dateitransfer (`lcb` + `ahb`) chunked die Datei, das Gerät meldet am Ende
+eine CRC, die App vergleicht sie (`checkFileCRC`) und antwortet mit
+`sendFileCheckResult(ok)`. Das ist eine Transportkontrolle, keine
+Authentifizierung.
+
+## 9.2 Die vier Ebenen im Vergleich
+
+| Ebene | Mechanismus in der App | Aufwand | Erfolgsaussicht |
+|---|---|---|---|
+| **Ziffernblatt** | `CRPWatchFaceInfo(File, type)` + `sendWatchFace(...)`; Foto-Ziffernblatt (`sendPhotoWatchFace`); Store `api.moyoung.com/faces/...` | niedrig | **hoch** (Foto offiziell, eigene .bin per Sideload plausibel) |
+| **UI-Ressourcen** (Icons, Sprache, Layout) | `CRPUiTransInitiator.start(File, int, String)` (Cmd `0x6C`), `CRPBkTransInitiator` (Cmd `0xF7`, Beken), `CRPTpTransInitiator` (Touchpanel-FW) | mittel | **mittel** – Format proprietär, App nutzt es selbst nicht |
+| **Watch-Apps** | `installApp(File, CRPAppTransListener)`, AppMarket (`api.moyoung.com`), OpenHarmony-Bridge (`device.appmarket.openharmony.*`) | hoch | **niedrig** – Pakete sind herstellerseitig signiert/geprüft |
+| **Firmware (MCU)** | siehe 9.1, pro Chip eigene Controller | sehr hoch | **niedrig bis mittel, modellabhängig** |
+| **Bootloader / Secure Boot** | nicht adressierbar | extrem hoch | **praktisch 0** ohne SWD und offenes Debug |
+
+Chip-Familien, die das SDK unterstützt (`CRPMcuPlatform`):
+`NORDIC, HUNTERSUN, REALTEK, GOODIX, SIFLI, JIELI, BLUETRUM, HISILICON`
+(jeweils mit eigenem DFU-Controller: `com.crrepa.ble.ota.*`, `nrf.dfu.*`,
+`com.realsil.sdk.*`, `sifli.dfu.*`). Der Nordic-Pfad ist die volle
+nRF-DFU-Bibliothek inkl. „Bootloader from SDK 9.0 or newer. Signature
+supported" – bei Nordic-Modellen ist eine Signaturprüfung also *möglich*,
+aber optional und vom Hersteller konfiguriert.
+
+## 9.3 Warum „komplette Software" trotzdem scheitert
+
+1. **Kein Quellcode, kein Uhren-SDK.** Die App ist Closed Source; die
+   Band-Firmware ist ein binäres Image ohne Doku.
+2. **Firmware liegt nicht bei.** In der APK stehen nur die Download-URLs.
+3. **Bootloader ist das Nadelöhr.** Die App prüft nichts, die Uhr schon –
+   oder eben nicht. Das ist modellabhängig und ohne Testgerät nicht
+   vorhersagbar.
+4. **Brick-Risiko ohne Rettungsweg.** Recovery gibt es nur bei Goodix
+   (`RestoreFirmwareActivity` / `RestoreFirmwareController`) und über die
+   Stock-OTA. Ein halb geschriebenes Image macht das Band sonst zum
+   Briefbeschwerer.
+5. **Rechtlich.** Eigene Uhr flashen ist okay; veränderte Firmware
+   weitergeben oder fremde Geräte flashen nicht.
+
+## 9.4 Realistischer Fahrplan
+
+1. **Modell und Chip bestimmen.** In der App unter Gerät → Firmware-Version
+   steht ein String der Form `X-Y-Z`; `FirmwareVersionUtils.getFirmwareType()`
+   nimmt Teil 2 als Typ. Alternativ mit nRF Connect die Services anschauen:
+   `FEEA…` = CRREPA-Standard, `6E40FF02/6E40FF03` = Nordic-UART,
+   `6473-5f696c666973` = SiFli.
+2. **Eigenes OTA-Paket abfangen.** Proxy (mitmproxy) mit eigenem CA-Zertifikat
+   plus gepatchter `network_security_config`, oder URL aus dem Logcat fischen.
+   Das Zip ist ein normaler HTTP-Download; danach lässt sich das Format
+   (Header, Magic, Version, evtl. Signaturblock) analysieren.
+3. **Zuerst Ziffernblatt/UI testen** – dort ist ein Fehlschlag folgenlos.
+4. **Erst dann Firmware.** Vorher: identisches Stock-Image besorgen, als
+   Recovery in der Hinterhand.
+
+Wer ein Firmware-Zip oder ein Watchface-`.bin` hat: damit lässt sich das
+Format und die Frage „signiert oder nicht" konkret beantworten.
