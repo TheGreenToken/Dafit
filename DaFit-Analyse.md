@@ -372,3 +372,121 @@ aber optional und vom Hersteller konfiguriert.
 
 Wer ein Firmware-Zip oder ein Watchface-`.bin` hat: damit lässt sich das
 Format und die Frage „signiert oder nicht" konkret beantworten.
+
+---
+
+# 10. Konkretes Modell: ZL99J mit MOY-VYG2-2.0.8
+
+## 10.1 Was das Modell ist
+
+| | |
+|---|---|
+| Modell | **ZL99J** (FCC ID `2A5HP-ZL99J`, Shenzhen Zhilian Shengya) |
+| Display | 2,01" TFT, 240 × 296 |
+| MCU | **JieLi JL7012F6** (= AC701N-Familie, Bootloader „br28") |
+| Speicher | 64 Mb bzw. 128 MB Flash, 578 KB RAM |
+| Sensorik | PPG HX3600 / LC09A, G-Sensor SC7A20 / DA267 |
+| Funk | BLE 5.2 |
+| App | Da Fit (`com.crrepa.band.dafit`) |
+| Firmware | `MOY-VYG2-2.0.8` |
+
+Hinweis: Einzelne Händler-Listings nennen fälschlich „RTL8763EWE" (Realtek) –
+das ist Copy-Paste. Die überwiegende Zahl der ODM-Datenblätter (4BS, TVCMALL,
+Made-in-China, Glaymertec, Alibaba) nennt **JL7012F6**. Die FCC-Innenfotos
+(`2A5HP-ZL99J`, Internal Photos) würden es endgültig bestätigen.
+
+## 10.2 Versionsstring
+
+`MOY-VYG2-2.0.8` → `FirmwareVersionUtils.getFirmwareType()` splittet an `-`
+und nimmt Index 1: **`VYG2`**. Das ist die Kompatibilitätsfamilie, nicht der
+Chip. `MOY` = Moyoung (Hersteller des Protokolls), `2.0.8` = Version.
+Für die Update-Abfrage heißt das: `version=MOY-VYG2-2.0.8`,
+`app_version=1.0.2`, plus MAC.
+
+## 10.3 Was das für die Modbarkeit heißt
+
+Der JL7012F6 ist – gemessen an der CRREPA-Chip-Landschaft – **der mod-freundlichste
+Fall**. Grund: JieLi ist ein offenerer Hersteller als Goodix/SiFli.
+
+### Ebene 1: Ziffernblätter – gelöst, es gibt fertige Community-Tools
+
+Das Moyoung-v2-Protokoll ist dokumentiert (Gadgetbridge) und deckt sich exakt
+mit dem, was ich in der APK gefunden habe (`FE EA 20 0A 31 …`).
+
+* **DaFup** (Python, bleak) – lädt Ziffernblatt- und Hintergrund-`.bin`-Dateien
+  auf MoYoung-v2-Uhren.
+* **extrathundertool** (Rust) – Encoder/Decoder für Ziffernblatt-Dateien,
+  damit lassen sich eigene bauen.
+* **DaFbc** – wandelt Hintergrundbilder ins Binärformat.
+* **Gadgetbridge** unterstützt Moyoung v2 als Ersatz für die Da-Fit-App
+  (Ziffernblatt-Upload macht es selbst nicht, aber Verbinden/Sync/Zeit/Alarme).
+
+Das ist der pragmatische Weg: eigene Dials bauen, per DaFup hochladen, Da Fit
+dafür gar nicht mehr nötig.
+
+### Ebene 2: UI-Ressourcen (Icons, Sprache, Layout)
+
+JieLi trennt offiziell zwei Update-Arten:
+
+* **Firmware** → `update.ufw`
+* **Ressourcen** → `upgrade.zip` mit `res.ori` im Inneren
+
+Die CRREPA-Bibliothek kann das theoretisch (`CRPUiTransInitiator`,
+Kommando `0x6C`), die Da-Fit-Oberfläche nutzt es nicht. Format ist
+JieLi-proprietär; ohne ein Referenzpaket vom Hersteller kaum nachzubauen.
+
+### Ebene 3: Firmware
+
+Der DFU-Pfad der App läuft bei diesem Modell über
+`com.crrepa.ble.ota.jieli.JieliDfuController` → `q2b`/`lcb`-Dateitransfer.
+
+Was für JL7012F6/AC701N öffentlich existiert:
+
+* `Jieli-Tech/fw-Bootloader` – Bootloader-Quellcode, Tabelle nennt AC701N → `br28`
+* `Jieli-Tech/Android-JL_OTA`, `iOS-JL_OTA` – offizielles RCSP-OTA-SDK
+* `Jieli-Tech/fw-AC63_BT_SDK` – SDK-Quellen (AC701N-SDK über Distributoren)
+* `kagaimiq/jl-uboot-tool` – Flasher/Dumper, unterstützt **AC701N** (BR28)
+* Quarkslab-Artikel – haben eine JieLi-Uhr-Firmware extrahiert, das
+  „neue Firmware-Format" und die Ressourcen-Scrambling reverse-engineered
+
+Damit ist ein **eigenes Firmware-Image prinzipiell möglich** – aber es ist ein
+Wochen/Monate-Projekt: Board-Konfiguration (LCD 240×296, Touch CST820,
+PPG HX3600, ACC SC7A20, Flash-Größe, Pinmux), JieLi-Toolchain, UI-Framework.
+Ein „Custom OS" ist nicht realistisch, ein gepatchtes Stock-Image eher.
+
+Wichtig: Die JieLi-OTA hat eine **Session-Authentifizierung** (RCSP/HashPair),
+das ist aber keine Signatur des Images. Ob der br28-Bootloader ein Image
+kryptografisch prüft, ist konfigurierbar und vom Hersteller abhängig – das
+sieht man erst am konkreten `update.ufw`.
+
+### Ebene 4: Hardware-Zugang
+
+Wenn OTA nicht reicht: JL-Chips lassen sich über UART/USB in den
+Upgrade-Modus zwingen (Forced-Download-Tool, oder Flash-MISO beim Boot nach
+GND). Dafür muss die Uhr auf – bei diesem Gehäuse (IP68, verklebt) ist das
+der unangenehmste Schritt.
+
+## 10.4 Woher das Firmware-Paket kommt
+
+1. **Aus der App heraus**: Update-Check auslösen, Traffic mitschneiden
+   (mitmproxy + eigenes CA-Zertifikat), URL + MD5 aus der Antwort ziehen.
+2. **Über die Community-Route**: Für Moyoung-Uhren ist dokumentiert, dass
+   `crrepa.com` auf Anfrage mit Modelltyp, Version und MAC die passende
+   Firmware herausgibt (siehe atc1441/DaFlasherFiles, Issue #7).
+3. Danach: Container analysieren (Header, Magic, Längen, evtl. Scrambling),
+   erst dann an Modifikation denken.
+
+## 10.5 Risiko-Einschätzung für genau dieses Modell
+
+| Vorhaben | Aussicht | Anmerkung |
+|---|---|---|
+| Eigenes Ziffernblatt | **sehr hoch** | DaFup + extrathundertool, Community-erprobt |
+| Da Fit durch Gadgetbridge ersetzen | hoch | Moyoung v2 wird unterstützt |
+| UI-Ressourcen tauschen | mittel | JieLi `res.ori`, Format unbekannt |
+| Firmware patchen | mittel-niedrig | Bootloader-Frage, Toolchain nötig |
+| Komplett eigenes OS | sehr niedrig | Monate Arbeit, kein Nutzen |
+
+**Brick-Warnung:** Ob die Uhr Single- oder Dual-Bank-OTA nutzt, ist von außen
+nicht sichtbar. Bei Single-Bank macht ein Abbruch mitten im Flash das Gerät
+unbrauchbar; bei Dual-Bank bleibt die alte Partition als Fallback. Ohne
+Hardware-Backup (jl-uboot-tool über UART) gibt es keinen Rettungsweg.
