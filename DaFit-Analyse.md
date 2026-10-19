@@ -8,7 +8,7 @@ Stand: 19.10.2026 · Analysiert: `Da Fit.apk` aus `DaFit.zip` (Google Drive)
 
 | | |
 |---|---|
-| Archiv | `DaFit.zip` (83,2 MB, SHA-256 `633a9544…4cd91`) |
+| Archiv | `DaFit.zip` (83,2 MB, SHA-256 `633a9544…9124cd91`) |
 | Enthält | **`Da Fit.apk`** – 157.504.139 Bytes (150 MB) |
 | SHA-256 APK | `4aa538efa0bf2c46e0ba70b5ab4c2099f9a0a9235c09f660046f0ff285ae7a7b` |
 | MD5 APK | `9e4fd8b24df9473e3187a0eaedf49739` |
@@ -252,3 +252,15 @@ eigenes Firmware-Mod ist damit kein realistischer Weg.
 
 (Alle Werte aus den Bytecode-Konstanten bzw. der Rechenlogik in
 `mrc.b()` / `mrc.c()` abgeleitet.)
+
+---
+
+## 8. Dateien in diesem Repo
+
+| Datei | Inhalt |
+|---|---|
+| `DaFit-Analyse.md` | dieser Bericht |
+| `tools/dafit_set_time.py` | Beispiel-Client (bleak), setzt Zeit/Zeitzone/Format per BLE |
+
+Die APK selbst ist **nicht** eingecheckt (150 MB, und sie gehört dem Hersteller).
+Der ursprüngliche Google-Drive-Link bleibt die Quelle.
