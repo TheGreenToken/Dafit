@@ -490,3 +490,102 @@ der unangenehmste Schritt.
 nicht sichtbar. Bei Single-Bank macht ein Abbruch mitten im Flash das Gerät
 unbrauchbar; bei Dual-Bank bleibt die alte Partition als Fallback. Ohne
 Hardware-Backup (jl-uboot-tool über UART) gibt es keinen Rettungsweg.
+
+---
+
+# 11. Mod-Ideen für ZL99J / MOY-VYG2 (JL7012F6)
+
+Voraussetzung für alles ab Stufe 2: **erst dumpen, dann patchen.** Ohne
+vollständiges Flash-Abbild gibt es keinen Rückweg. Die Reihenfolge unten ist
+so sortiert, dass du nach jedem Schritt etwas Funktionierendes hast.
+
+## Stufe 0 – kein Flash, kein Risiko, sofort machbar
+
+| Idee | Wie | Warum lohnt es |
+|---|---|---|
+| **Eigenes Ziffernblatt** | `.bin` mit `extrathundertool` bauen, per **DaFup** hochladen | Template 70 = **240 × 296**, exakt deine Auflösung (Referenz: MOY-VSW4) |
+| **Eigenes Hintergrundbild** | DaFup-Modus `background`, Bild via **DaFbc** konvertieren | ändert den Look der ganzen UI, nicht nur des Dials |
+| **Da Fit ersetzen** | **Gadgetbridge** (Moyoung v2) | kein Cloud-Zwang, keine Werbung, offene Daten |
+| **Uhr als Makro-Tastatur** | eigener BLE-Client, Button-Notify → PC | Präsentations-Fernbedienung, OBS-Szenen, Media-Keys |
+| **PC-Dashboard auf der Uhr** | eigener Client schickt Notifications mit CPU/RAM/Temp | netter Desk-Gimmick, null Risiko |
+| **Zeit/Zeitzone frei setzen** | `tools/dafit_set_time.py` aus diesem Repo | schon fertig |
+
+## Stufe 1 – Ressourcen tauschen (Risiko niedrig, Rettung per Stock-OTA)
+
+Die JieLi-Firmware ist ein Dateisystem („JLFS"): Flash-Header, Dateiliste,
+`uboot.boot`, `isd_config.ini`, `app_dir_head` (mit `app.bin`, `cfg_tool.bin`),
+danach der Ressourcenbereich (`tone`, UI-Bilder, Fonts) und `key_mac`.
+Ressourcen sind einzeln per **CRC16** abgesichert (siehe `tone.idx`-Format) –
+wer tauscht, muss die CRC neu berechnen.
+
+| Idee | Ansatzpunkt | Aufwand |
+|---|---|---|
+| **Boot-Logo / Splash ersetzen** | Bitmap im Ressourcenbereich suchen (binwalk, 240×296, Palette) | klein |
+| **Icon-Set komplett neu** | Menü-Icons als Paletten-Bitmaps, 1:1-Größe | mittel |
+| **Schriftart ersetzen** | Bitmap-Font im Ressourcenbereich, z. B. Pixel-/Dot-Matrix-Font | mittel |
+| **Strings umschreiben** | UTF-8/UTF-16-Scan im Resource-Block; deutsche oder eigene Texte | klein–mittel |
+| **Menü aufräumen** | Einträge ausblenden (Blutdruck-Pseudo-Feature, Spiele) – nur wenn datengetrieben | mittel |
+| **Theme-Palette** | 16/24-Bit-Paletten global verschieben → andere Farbwelt | klein |
+
+## Stufe 2 – Verhalten patchen (echtes Firmware-Modding)
+
+| Idee | Was genau | Risiko |
+|---|---|---|
+| **Versionsstring ändern** | `MOY-VYG2-2.0.8` → z. B. `MOY-VYG2-9.9.9`; verhindert Update-Nervigkeit | niedrig |
+| **BLE-Name ändern** | Advertiser-String (`key_mac`/Config) → „Pebble", „Casio" … | niedrig |
+| **MAC ändern** | MAC liegt im `key_mac`-Bereich | niedrig, aber Kopplung neu |
+| **Display-Timeout / Helligkeit** | Konstanten im `app.bin`-Bereich suchen (Vergleichswerte, Schwellen) | mittel |
+| **Always-On / Dim-Modus** | wenn im Code vorhanden, nur per Flag deaktiviert → freischalten | mittel |
+| **Vibrationsmuster** | PWM-Duty / Pattern-Tabelle; härtere Alarme | mittel |
+| **Akkubetrieb** | Low-Battery-Schwelle, Gauge-Kurve, Anzeige in mV/% | mittel |
+| **Schrittzähler ehrlich machen** | Glättungs-/Inflationsfaktor im Code; oder Rohdaten ausgeben | mittel |
+| **HR/SpO2-Takt** | Sample-Intervall, Mittelung, Aktivierungsbedingungen | mittel |
+| **Rohdaten-Stream** | eigenes BLE-Kommando → Accelerometer/PPG unverarbeitet | hoch, aber der spannendste Mod |
+| **Uhr ohne Handy stellen** | eigener BLE-Befehl + Option im Menü | hoch |
+| **Debug-/Log-Kanal** | UART-Log über BLE-Notify mitschneiden | hoch |
+
+## Stufe 3 – „richtige" Mods (Wochen Projekte)
+
+* **Eigenes UI-Framework-Feature**: z. B. ein zweites Ziffernblatt-Layout mit
+  Wetterzeile, oder eine Trainings-Ansicht mit Intervall-Timer.
+* **Offline-Modus**: Cloud-Verbindung der App kappen (hosts/VPN) und die Uhr
+  rein lokal betreiben – Watchface-Store und Firmware-Update gehen dann
+  natürlich nicht mehr.
+* **Sensor-Devboard**: die Uhr als BLE-Peripherie für eigene Experimente
+  (Gangart-Erkennung, Puls-Verlauf, Schlaf-Logging mit eigener Auswertung).
+* **Eigene Watch-App** über den JieLi-App-Mechanismus – der Weg ist in der
+  App vorhanden (`installApp`, `AppMarket`), die Pakete sind aber
+  herstellerseitig geprüft. Hoher Aufwand, geringe Erfolgswahrscheinlichkeit.
+
+## Stufe 4 – Hardware (wenn Software nicht weiterkommt)
+
+* **UART-Pads suchen** (TX/RX/GND, oft neben dem Akku): damit lässt sich der
+  komplette Flash mit `jl-uboot-tool` dumpen **und zurückschreiben** –
+  das ist deine Versicherung gegen Brick.
+* **Forced-Download-Modus**: beim Boot Flash-MISO nach GND ziehen, dann per
+  JL-Download-Tool flashen.
+* **Größerer Flash** (64 Mb → 128 Mb) für mehr Ziffernblätter/Musik – nur mit
+  angepasster `isd_config.ini`.
+
+## Die drei Projekte, die ich zuerst bauen würde
+
+1. **„Retro-Terminal"-Dial**: Dot-Matrix-Font, Uhrzeit groß, darunter eine
+   Zeile mit Akku in mV, Schritten und Datum. Nur Stufe 0/1.
+2. **„Lügender Wecker"**: Firmware-Version patchen, damit Da Fit Ruhe gibt,
+   plus ein Dial, der neben der Uhrzeit den Offset zur echten Zeit anzeigt
+   (nutzt `tools/dafit_set_time.py`).
+3. **Rohdaten-Stream**: eigenes Kommando, das Accelerometer + PPG
+   unverarbeitet über BLE schickt. Damit kannst du die „Messwerte" der Uhr
+   nachrechnen und sehen, was echt ist und was generiert wird.
+
+## Arbeitsmittel, die ich dir dafür bauen kann
+
+* JLFS-Parser/Repacker (Flash-Header, Dateiliste, `uboot.boot`, `app.bin`,
+  Ressourcen, CRC16 neu berechnen) – Python, im Repo.
+* Watchface-Pipeline: SVG/PNG → `.bin` (Template 70, 240 × 296).
+* BLE-Toolkit auf Basis des vorhandenen `dafit_set_time.py`:
+  Datei-Upload, Notifications, Kommandos.
+* Diff-Werkzeug: zwei Firmware-Stände vergleichen und Patchstellen finden.
+
+Sag Bescheid, welches davon zuerst – der JLFS-Parser ist die Grundlage für
+alles ab Stufe 1.
